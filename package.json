@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "luxon": "^3.7.2",
+    "tz-lookup": "^6.1.25"
+  }
+}

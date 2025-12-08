@@ -1,0 +1,1 @@
+before you can do "npm run dev" use this line "Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned" and select Y
