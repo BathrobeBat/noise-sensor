@@ -134,7 +134,8 @@ Example:
 ```bash
 cd frontend/
 npm install
-npm run dev
+on localhost: npm run dev
+on network: npm run dev -- --host 0.0.0.0 --port 5173
 ```
 
 Frontend runs at:

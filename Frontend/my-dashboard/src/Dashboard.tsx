@@ -2,8 +2,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ResponsiveContainer,
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  AreaChart, Area
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  AreaChart,
+  Area,
 } from "recharts";
 
 // ---- Backend ----
@@ -24,7 +30,7 @@ const PRESETS: { value: Preset; label: string }[] = [
   { value: "day", label: "Single day (24h)" },
 ];
 
-// ---- Themes (oude dashboard look) ----
+// ---- Themes ----
 const THEMES = {
   light: {
     name: "light" as const,
@@ -56,15 +62,24 @@ function getIsNightNow() {
 }
 
 export default function Dashboard() {
+  // ---------- Mobile detection ----------
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   // ---------- Live chart ----------
   const [live, setLive] = useState<LivePoint[]>([]);
-
-  // Live buffer: 20 punten (last ~20 sec)
+  // Live buffer: 20 points (last ~20 sec)
   const LIVE_POINTS = 20;
 
   // ---------- Historical chart ----------
   const [preset, setPreset] = useState<Preset>("60m");
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [selectedDate, setSelectedDate] = useState(() =>
+    new Date().toISOString().slice(0, 10)
+  );
   const [history, setHistory] = useState<HistoryPoint[]>([]);
 
   // ---------- Theme ----------
@@ -82,7 +97,6 @@ export default function Dashboard() {
   // ---------- Auto day/night ----------
   const [isNight, setIsNight] = useState(getIsNightNow());
   useEffect(() => {
-    // update elke minuut zodat hij vanzelf omschakelt
     const id = setInterval(() => setIsNight(getIsNightNow()), 60_000);
     return () => clearInterval(id);
   }, []);
@@ -90,7 +104,16 @@ export default function Dashboard() {
   // ---------- Helpers ----------
   const formatTime = (ts: number | string) => {
     const d = new Date(ts);
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    return d.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  };
+
+  const formatLiveTime = (ts: number) => {
+    const d = new Date(ts);
+    return d.toLocaleTimeString([], { minute: "2-digit", second: "2-digit" }); // mm:ss
   };
 
   function classify(dba: number, night: boolean) {
@@ -104,7 +127,9 @@ export default function Dashboard() {
   useEffect(() => {
     const id = setInterval(async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/api/live?device_id=${DEVICE_ID}`);
+        const res = await fetch(
+          `${BACKEND_URL}/api/live?device_id=${DEVICE_ID}`
+        );
         if (!res.ok) throw new Error("HTTP " + res.status);
         const data = await res.json();
 
@@ -140,7 +165,6 @@ export default function Dashboard() {
 
     fetchHistory();
 
-    // Refresh cadence: sneller bij 60s, anders rustiger
     const refreshMs = preset === "60s" ? 5000 : 60000;
     const id = setInterval(fetchHistory, refreshMs);
     return () => clearInterval(id);
@@ -160,12 +184,18 @@ export default function Dashboard() {
   // Labels
   const historyTitle = useMemo(() => {
     switch (preset) {
-      case "60s": return "Historical (Last 60 seconds)";
-      case "60m": return "Historical (Last 60 minutes)";
-      case "24h": return "Historical (Last 24 hours)";
-      case "7d":  return "Historical (Last 7 days)";
-      case "day": return `Historical (Selected day: ${selectedDate})`;
-      default:    return "Historical";
+      case "60s":
+        return "Historical (Last 60 seconds)";
+      case "60m":
+        return "Historical (Last 60 minutes)";
+      case "24h":
+        return "Historical (Last 24 hours)";
+      case "7d":
+        return "Historical (Last 7 days)";
+      case "day":
+        return `Historical (Selected day: ${selectedDate})`;
+      default:
+        return "Historical";
     }
   }, [preset, selectedDate]);
 
@@ -175,7 +205,8 @@ export default function Dashboard() {
         minHeight: "100vh",
         background: theme.bg,
         color: theme.ink,
-        fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Inter, sans-serif",
+        fontFamily:
+          "system-ui, -apple-system, Segoe UI, Roboto, Inter, sans-serif",
         padding: "24px",
       }}
     >
@@ -186,6 +217,8 @@ export default function Dashboard() {
           justifyContent: "space-between",
           alignItems: "center",
           marginBottom: 24,
+          gap: 12,
+          flexWrap: "wrap",
         }}
       >
         <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: theme.ink }}>
@@ -217,7 +250,7 @@ export default function Dashboard() {
       <section
         style={{
           display: "grid",
-          gridTemplateColumns: "1fr 1fr 2fr",
+          gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 2fr",
           gap: 16,
           marginBottom: 16,
         }}
@@ -238,11 +271,13 @@ export default function Dashboard() {
           <div style={{ fontSize: 14, fontWeight: 700 }}>Noise & Heart Health</div>
           <p style={{ margin: 0, fontSize: 15, opacity: 0.9 }}>
             Chronic noise exposure raises stress hormones, disrupts sleep,
-            and impairs vascular function-linked to hypertension and ischemic heart disease.
+            and impairs vascular function-linked to hypertension and ischemic
+            heart disease.
           </p>
 
           <div style={{ fontSize: 13, opacity: 0.9 }}>
-            WHO limits: <b>≤55 dB</b> day (<i>Lden</i>), <b>≤45 dB</b> night (<i>Lnight</i>)
+            WHO limits: <b>≤55 dB</b> day (<i>Lden</i>), <b>≤45 dB</b> night (
+            <i>Lnight</i>)
           </div>
 
           <div
@@ -251,6 +286,8 @@ export default function Dashboard() {
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
+              gap: 10,
+              flexWrap: "wrap",
             }}
           >
             <div style={{ fontSize: 13, opacity: 0.9 }}>
@@ -296,7 +333,8 @@ export default function Dashboard() {
             {current.toFixed(1)}
           </div>
           <div style={{ fontSize: 12, opacity: 0.8, marginTop: 8 }}>
-            {isNight ? "Night limit ~45 dB" : "Day limit ~55 dB"} · Live points: {LIVE_POINTS}
+            {isNight ? "Night limit ~45 dB" : "Day limit ~55 dB"} · Live points:{" "}
+            {LIVE_POINTS}
           </div>
         </div>
 
@@ -321,8 +359,9 @@ export default function Dashboard() {
                 <XAxis
                   dataKey="t"
                   tick={{ fill: theme.ink }}
-                  tickFormatter={(value) => formatTime(value as number)}
-                  interval={1}
+                  tickFormatter={(value) => formatLiveTime(value as number)}
+                  interval={isMobile ? 4 : 2}
+                  minTickGap={isMobile ? 60 : 24}
                   tickLine={false}
                   axisLine={false}
                 />
@@ -376,7 +415,7 @@ export default function Dashboard() {
             {historyTitle}
           </div>
 
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <label style={{ fontSize: 12, opacity: 0.85 }}>
               View:&nbsp;
               <select
@@ -391,7 +430,9 @@ export default function Dashboard() {
                 }}
               >
                 {PRESETS.map((p) => (
-                  <option key={p.value} value={p.value}>{p.label}</option>
+                  <option key={p.value} value={p.value}>
+                    {p.label}
+                  </option>
                 ))}
               </select>
             </label>
@@ -411,22 +452,25 @@ export default function Dashboard() {
               />
             )}
 
-            <div style={{ fontSize: 12, opacity: 0.7 }}>
-              {history.length} points
-            </div>
+            <div style={{ fontSize: 12, opacity: 0.7 }}>{history.length} points</div>
           </div>
         </div>
 
         <div style={{ height: 320 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={historicalChartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+            <AreaChart
+              data={historicalChartData}
+              margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
+            >
               <CartesianGrid stroke={theme.grid} strokeDasharray="3 3" />
               <XAxis
                 dataKey="time"
                 tick={{ fill: theme.ink }}
                 tickFormatter={(value) => formatTime(value)}
-                interval="preserveStartEnd"
-                minTickGap={28}
+                interval={isMobile ? 6 : "preserveStartEnd"}
+                minTickGap={isMobile ? 70 : 28}
+                tickLine={false}
+                axisLine={false}
               />
               <YAxis
                 domain={[35, 85]}
