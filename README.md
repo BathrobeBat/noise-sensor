@@ -141,6 +141,7 @@ on network: npm run dev -- --host 0.0.0.0 --port 5173
 Frontend runs at:
 
 `http://localhost:5173`
+`http://<PC_IP>:5173`
 
 ### Backend URL config
 
