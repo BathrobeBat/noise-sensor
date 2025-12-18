@@ -11,10 +11,11 @@
 
 // =================== WiFi ===================
 const char* WIFI_SSID = "Vodafone-25DC";
-const char* WIFI_PASS = "sGtyn6ZJmtzybPsX";
+const char* WIFI_PASS = "sGtyn6ZJmtzybPsX"; 
 
 // =================== Backend API ===================
 const char* BACKEND_URL = "http://192.168.0.240:8080/api/noise-data";
+const char* DEVICE_ID   = "ESP32_001";
 
 // =================== OLED (SSD1306) ===================
 #define SCREEN_WIDTH 128
@@ -24,7 +25,7 @@ const char* BACKEND_URL = "http://192.168.0.240:8080/api/noise-data";
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-// Grafiek-instellingen
+// Graph settings
 const float DB_MIN = 35.0;
 const float DB_MAX = 85.0;
 const uint8_t GRAPH_X = 0;
@@ -36,15 +37,67 @@ float ringBuf[SCREEN_WIDTH];
 uint8_t head = 0;
 float currentDb = 50.0;
 
-// Display-refresh timing
+// Display refresh timing
 const unsigned long SAMPLE_EVERY_MS = 120;
 unsigned long lastDisplayMs = 0;
 
-// Data sending timing (every 1 second)
-unsigned long lastSendMs = 0;
-const unsigned long SEND_INTERVAL_MS = 1000;
+// =================== MIC (SPH0645) via I2S ===================
+#define I2S_WS 5
+#define I2S_SCK 16
+#define I2S_SD 17
 
-// Helpers voor grafiek
+static const i2s_port_t I2S_PORT = I2S_NUM_0;
+static const uint32_t SAMPLE_RATE = 16000;
+
+static const i2s_config_t i2s_config = {
+  .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
+  .sample_rate = SAMPLE_RATE,
+  .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
+  .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
+  .communication_format = I2S_COMM_FORMAT_I2S,
+  .intr_alloc_flags = 0,
+  .dma_buf_count = 4,
+  .dma_buf_len = 512,
+  .use_apll = false,
+  .tx_desc_auto_clear = false,
+  .fixed_mclk = 0
+};
+
+static const i2s_pin_config_t pin_config = {
+  .bck_io_num = I2S_SCK,
+  .ws_io_num = I2S_WS,
+  .data_out_num = -1,
+  .data_in_num = I2S_SD
+};
+
+#define BLOCK_SAMPLES 1024
+static const float NORM_DIV = 131072.0f;
+static float CAL_OFFSET_DBA = 120.0f;
+static const float EPS_F = 1e-12f;
+
+// Simple HPF
+struct OnePoleHPF {
+  float a = 0.995f;
+  float y = 0.0f;
+  float x_prev = 0.0f;
+  float process(float x) {
+    y = a * (y + x - x_prev);
+    x_prev = x;
+    return y;
+  }
+} hpf;
+
+int32_t rx_buf[BLOCK_SAMPLES];
+
+// 1s aggregation
+double sumsq_1s = 0.0;
+uint32_t samples_1s = 0;
+uint32_t t1_start_ms = 0;
+
+// =================== FreeRTOS queue for sending ===================
+static QueueHandle_t sendQueue;
+
+// ======== Helpers for graph ========
 float clampf(float v, float lo, float hi) {
   if (v < lo) return lo;
   if (v > hi) return hi;
@@ -65,7 +118,6 @@ void pushSample(float dB) {
 void drawGraph() {
   display.drawRect(GRAPH_X, GRAPH_Y, GRAPH_W, GRAPH_H, SSD1306_WHITE);
 
-  // Hulplijn 55dB
   const float WHO_DAY = 55.0;
   int yWho = mapDbToY(WHO_DAY);
   for (int x = GRAPH_X + 1; x < GRAPH_X + GRAPH_W - 1; x += 4) {
@@ -103,109 +155,85 @@ void drawHeader() {
   display.print(label);
 }
 
-// =================== MIC (SPH0645) via I2S ===================
-#define I2S_WS 5
-#define I2S_SCK 16
-#define I2S_SD 17
-
-static const i2s_port_t I2S_PORT = I2S_NUM_0;
-static const uint32_t SAMPLE_RATE = 16000;
-
-static const i2s_config_t i2s_config = {
-  .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
-  .sample_rate = SAMPLE_RATE,
-  .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
-  .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-  .communication_format = I2S_COMM_FORMAT_I2S,
-  .intr_alloc_flags = 0,
-  .dma_buf_count = 4,
-  .dma_buf_len = 512,
-  .use_apll = false,
-  .tx_desc_auto_clear = false,
-  .fixed_mclk = 0
-};
-
-static const i2s_pin_config_t pin_config = {
-  .bck_io_num = I2S_SCK,
-  .ws_io_num = I2S_WS,
-  .data_out_num = -1,
-  .data_in_num = I2S_SD
-};
-
-#define BLOCK_SAMPLES 1024
-static const float NORM_DIV = 131072.0f;
-
-static float CAL_OFFSET_DBA = 120.0f;
-
-static const float EPS_F = 1e-12f;
-
-// eenvoudige HPF
-struct OnePoleHPF {
-  float a = 0.995f;
-  float y = 0.0f;
-  float x_prev = 0.0f;
-  float process(float x) {
-    y = a * (y + x - x_prev);
-    x_prev = x;
-    return y;
-  }
-} hpf;
-
-int32_t rx_buf[BLOCK_SAMPLES];
-
-// 1s aggregatie
-double sumsq_1s = 0.0;
-uint32_t samples_1s = 0;
-uint32_t t1_start_ms = 0;
-
-// =================== HTTP POST Function ===================
-void sendDataToBackend(float dba) {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi not connected!");
-    return;
-  }
+// =================== Network task (runs separately) ===================
+bool postToBackend(float dba) {
+  if (WiFi.status() != WL_CONNECTED) return false;
 
   HTTPClient http;
+  http.setTimeout(800); // mag best iets langer; blokkeert alleen de send-task
+
   http.begin(BACKEND_URL);
   http.addHeader("Content-Type", "application/json");
 
-  // Create JSON payload
-  String payload = "{\"dba_instant\":" + String(dba, 2) + "}";
+  String payload = "{\"dba_instant\":" + String(dba, 2) +
+                   ",\"device_id\":\"" + String(DEVICE_ID) + "\"}";
 
-  int httpResponseCode = http.POST(payload);
-
-  if (httpResponseCode > 0) {
-    Serial.print("Data sent: ");
-    Serial.print(dba, 2);
-    Serial.print(" dBA - Response: ");
-    Serial.println(httpResponseCode);
-  } else {
-    Serial.print("Error sending data: ");
-    Serial.println(httpResponseCode);
-  }
-
+  int code = http.POST(payload);
   http.end();
+
+  if (code > 0) {
+    Serial.printf("[SEND] OK %.2f dBA code=%d\n", dba, code);
+    return true;
+  } else {
+    Serial.printf("[SEND] FAIL code=%d\n", code);
+    return false;
+  }
 }
 
-// =================== SETUP AUXILIARY FUNCTIONS ===================
+void sendTask(void* param) {
+  float dba = 0.0f;
+
+  unsigned long backoffMs = 1000;
+  const unsigned long BACKOFF_MAX = 30000;
+
+  for (;;) {
+    // Wacht op nieuw punt uit de queue (blokkeert hier, dat is prima)
+    if (xQueueReceive(sendQueue, &dba, portMAX_DELAY) == pdTRUE) {
+      bool ok = postToBackend(dba);
+
+      if (!ok) {
+        // backoff bij backend down
+        vTaskDelay(pdMS_TO_TICKS(backoffMs));
+        backoffMs = min(backoffMs * 2, BACKOFF_MAX);
+      } else {
+        backoffMs = 1000;
+      }
+
+      // Als er veel punten in queue zitten, pak alleen de nieuwste (dropping old)
+      while (uxQueueMessagesWaiting(sendQueue) > 1) {
+        xQueueReceive(sendQueue, &dba, 0);
+      }
+    }
+  }
+}
+
+// =================== Setup helpers ===================
 void initializeSerial() {
   Serial.begin(115200);
-  delay(300);
+  delay(200);
   Serial.println("\nESP32 Noise Meter -> Backend");
 }
 
 void connectToWiFi() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
+
   Serial.print("Connecting to WiFi");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 8000) {
+    delay(250);
     Serial.print(".");
   }
   Serial.println();
-  Serial.print("Connected! IP: ");
-  Serial.println(WiFi.localIP());
-  Serial.print("Sending data to: ");
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("Connected! IP: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("WiFi not connected yet (OLED still runs).");
+  }
+
+  Serial.print("Backend URL: ");
   Serial.println(BACKEND_URL);
 }
 
@@ -231,13 +259,11 @@ void initializeOLEDDisplay() {
 }
 
 void initializeRingBuffer() {
-  for (int i = 0; i < GRAPH_W; i++) {
-    ringBuf[i] = 50.0;
-  }
+  for (int i = 0; i < GRAPH_W; i++) ringBuf[i] = 50.0;
   t1_start_ms = millis();
 }
 
-// =================== LOOP AUXILIARY FUNCTIONS ===================
+// =================== Loop helpers ===================
 bool readI2SAudioData(size_t& bytes_read, size_t& num_samples) {
   if (i2s_read(I2S_PORT, (void*)rx_buf, sizeof(rx_buf), &bytes_read, portMAX_DELAY) != ESP_OK) {
     return false;
@@ -248,9 +274,7 @@ bool readI2SAudioData(size_t& bytes_read, size_t& num_samples) {
 
 float calculateMean(size_t num_samples) {
   long long mean_acc = 0;
-  for (size_t i = 0; i < num_samples; i++) {
-    mean_acc += (rx_buf[i] >> 14);
-  }
+  for (size_t i = 0; i < num_samples; i++) mean_acc += (rx_buf[i] >> 14);
   return (float)mean_acc / (float)num_samples;
 }
 
@@ -274,31 +298,17 @@ void accumulateAudioData(double sumsq_block, size_t num_samples) {
   samples_1s += num_samples;
 }
 
-void processOneSecondData(uint32_t current_time) {
-  float rms_1s = sqrt(sumsq_1s / (double)samples_1s);
-  float dBA_1s = convertToDecibels(rms_1s);
-
-  // Send to backend
-  sendDataToBackend(dBA_1s);
-
-  // Reset counters
-  sumsq_1s = 0.0;
-  samples_1s = 0;
-  t1_start_ms = current_time;
-}
-
 void updateDisplay() {
   pushSample(currentDb);
-
   display.clearDisplay();
   drawHeader();
   drawGraph();
   display.display();
 }
 
-void processDisplayUpdate(unsigned long current_time) {
-  if (current_time - lastDisplayMs >= SAMPLE_EVERY_MS) {
-    lastDisplayMs = current_time;
+void processDisplayUpdate(unsigned long now) {
+  if (now - lastDisplayMs >= SAMPLE_EVERY_MS) {
+    lastDisplayMs = now;
     updateDisplay();
   }
 }
@@ -306,39 +316,65 @@ void processDisplayUpdate(unsigned long current_time) {
 // =================== SETUP ===================
 void setup() {
   initializeSerial();
+
+  // Queue for sending 1s values (keep a few; we drop old anyway)
+  sendQueue = xQueueCreate(5, sizeof(float));
+
   connectToWiFi();
   initializeI2SMicrophone();
   initializeOLEDDisplay();
   initializeRingBuffer();
-  lastSendMs = millis();
+
+  // Start send task on the other core (ESP32 has 2 cores)
+  xTaskCreatePinnedToCore(
+    sendTask,
+    "sendTask",
+    4096,
+    nullptr,
+    1,
+    nullptr,
+    0 // core 0 for network task
+  );
+
+  Serial.println("Setup complete.");
 }
 
 // =================== LOOP ===================
 void loop() {
-  // Read audio data from I2S microphone
   size_t bytes_read = 0;
   size_t num_samples = 0;
-  if (!readI2SAudioData(bytes_read, num_samples)) {
-    return;
-  }
+  if (!readI2SAudioData(bytes_read, num_samples)) return;
 
   // Process audio block
   float mean = calculateMean(num_samples);
   double sumsq_block = calculateSumOfSquares(num_samples, mean);
 
-  // Calculate instantaneous dBA
+  // Instant dBA for OLED
   float rms_block = sqrt(sumsq_block / (double)num_samples);
   currentDb = convertToDecibels(rms_block);
 
-  // Accumulate data for 1-second average
+  // Accumulate for 1-second average
   accumulateAudioData(sumsq_block, num_samples);
 
-  // Check if 1 second has elapsed
-  uint32_t current_time = millis();
-  if (current_time - t1_start_ms >= 1000) {
-    processOneSecondData(current_time);
+  uint32_t now = millis();
+
+  // Every 1 second: compute 1s average and push to queue (non-blocking)
+  if (now - t1_start_ms >= 1000) {
+    float rms_1s = sqrt(sumsq_1s / (double)samples_1s);
+    float dBA_1s = convertToDecibels(rms_1s);
+
+    // Push to queue without waiting; if full, drop oldest and insert newest
+    if (xQueueSend(sendQueue, &dBA_1s, 0) != pdTRUE) {
+      float dummy;
+      xQueueReceive(sendQueue, &dummy, 0);
+      xQueueSend(sendQueue, &dBA_1s, 0);
+    }
+
+    sumsq_1s = 0.0;
+    samples_1s = 0;
+    t1_start_ms = now;
   }
 
-  // Update display periodically
-  processDisplayUpdate(current_time);
+  // OLED update always smooth
+  processDisplayUpdate(now);
 }
