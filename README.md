@@ -40,6 +40,9 @@ ESP32 → Backend API → PostgreSQL → Backend API → Frontend Dashboard
   - I2S microphone (e.g. SPH0645)
   - SSD1306 OLED display
 - Arduino IDE or PlatformIO
+- Frontend libraries:
+  - React (Vite)
+  - Leaflet (interactive map for sensor selection)
 
 ---
 
