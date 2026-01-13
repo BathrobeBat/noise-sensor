@@ -239,6 +239,19 @@ Example SQL query:
 INSERT INTO devices (device_id, label, address, latitude, longitude)
 VALUES ('ESP32_003', 'Paris', 'Rue de Rivoli, Paris, France', 48.856613, 2.352222);
 ```
+This step links the device ID to a physical location and is required for:
+- Map visualization
+- Location-based filtering
+- Clear labeling in the dashboard
+
+4. No backend or frontend changes required
+- The backend dynamically stores data from all devices
+- The frontend automatically lists all devices from the database
+
+Once the ESP32 sends data, measurements will appear in:
+- Live charts
+- Historical charts
+- Location-based views
 
 ---
 
