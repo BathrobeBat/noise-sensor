@@ -231,6 +231,20 @@ The backend automatically accepts new device IDs, no changes are required there.
 
 The ESP32 will immediately start sending noise measurements to the backend.
 
+```
+3. Register the device location in the database
+
+To make the new device visible in the frontend (map and selector), add it to the devices table in PostgreSQL.
+
+Example SQL query:
+```sql
+To make the new device visible in the frontend (map and selector), add it to the devices table in PostgreSQL.
+
+Example SQL query:
+```
+
+```
+
 ---
 
 ## Notes
