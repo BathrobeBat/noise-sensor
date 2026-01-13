@@ -210,6 +210,49 @@ This project supports multiple ESP32 noise sensors without changing backend or f
 
 To add a new device, follow these steps:
 
+
+1. Update the ESP32 code
+
+In the ESP32 firmware, set a unique device ID.
+Each ESP32 must have its own DEVICE_ID.
+
+Example:
+```cpp
+const char* DEVICE_ID = "ESP32_003";
+```
+
+The backend automatically accepts new device IDs, no changes are required there.
+
+2. Upload the ESP32 firmware
+  - Update WiFi credentials if needed
+  - Upload the code to the ESP32
+  - Power the device
+
+The ESP32 will immediately start sending noise measurements to the backend.
+
+3. Register the device location in the database
+
+To make the new device visible in the frontend (map and selector), add it to the devices table in PostgreSQL.
+
+Example SQL query:
+```sql
+INSERT INTO devices (device_id, label, address, latitude, longitude)
+VALUES ('ESP32_003', 'Paris', 'Rue de Rivoli, Paris, France', 48.856613, 2.352222);
+```
+This step links the device ID to a physical location and is required for:
+- Map visualization
+- Location-based filtering
+- Clear labeling in the dashboard
+
+4. No backend or frontend changes required
+- The backend dynamically stores data from all devices
+- The frontend automatically lists all devices from the database
+
+Once the ESP32 sends data, measurements will appear in:
+- Live charts
+- Historical charts
+- Location-based views
+
 ---
 
 ## Notes
