@@ -204,7 +204,7 @@ const char* DEVICE_ID = "ESP32_001";
 
 ---
 
-### Adding a new ESP32 device
+## Adding a new ESP32 device
 
 This project supports multiple ESP32 noise sensors without changing backend or frontend code.
 
