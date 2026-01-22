@@ -10,8 +10,8 @@
 #include <HTTPClient.h>
 
 // =================== WiFi ===================
-const char* WIFI_SSID = "Vodafone-25DC";
-const char* WIFI_PASS = "sGtyn6ZJmtzybPsX"; 
+const char* WIFI_SSID = "YOUR-WIFI-NAME";
+const char* WIFI_PASS = "YOUR-WIFI-PASSW"; 
 
 // =================== Backend API ===================
 const char* BACKEND_URL = "http://192.168.0.240:8080/api/noise-data";
