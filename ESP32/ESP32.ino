@@ -14,8 +14,14 @@ const char* WIFI_SSID = "Vodafone-25DC";
 const char* WIFI_PASS = "sGtyn6ZJmtzybPsX"; 
 
 // =================== Backend API ===================
-const char* BACKEND_URL = "http://192.168.0.240:8080/api/noise-data";
-const char* DEVICE_ID   = "ESP32_001";
+
+// AWS
+const char* BACKEND_URL = "http://noise-sensor-alb-899662008.eu-central-1.elb.amazonaws.com/api/noise-data";
+
+//// Locally
+//const char* BACKEND_URL = "http://192.168.0.240:8080/api/noise-data";
+
+const char* DEVICE_ID   = "ESP32_003";
 
 // =================== OLED (SSD1306) ===================
 #define SCREEN_WIDTH 128
@@ -26,8 +32,8 @@ const char* DEVICE_ID   = "ESP32_001";
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 // Graph settings
-const float DB_MIN = 35.0;
-const float DB_MAX = 85.0;
+const float DB_MIN = 20.0;
+const float DB_MAX = 80.0;
 const uint8_t GRAPH_X = 0;
 const uint8_t GRAPH_Y = 22;
 const uint8_t GRAPH_W = 128;
@@ -72,7 +78,7 @@ static const i2s_pin_config_t pin_config = {
 
 #define BLOCK_SAMPLES 1024
 static const float NORM_DIV = 131072.0f;
-static float CAL_OFFSET_DBA = 120.0f;
+static float CAL_OFFSET_DBA = 96.0f;
 static const float EPS_F = 1e-12f;
 
 // Simple HPF
