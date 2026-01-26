@@ -135,23 +135,39 @@ export default function Dashboard() {
   );
 
   useEffect(() => {
-    const fetchDevices = async () => {
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/devices`);
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const data: Device[] = await res.json();
-        setDevices(data);
-        if (!selectedDeviceId && data.length > 0) setSelectedDeviceId(data[0].device_id);
-      } catch (err) {
-        console.error("Could not fetch devices:", err);
-      }
-    };
+  const fetchDevices = async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/devices`);
+      if (!res.ok) throw new Error("HTTP " + res.status);
 
-    fetchDevices();
-    const id = setInterval(fetchDevices, 60_000);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+      const data: Device[] = await res.json();
+      setDevices(data);
+
+      // ✅ Gebruik de echte laatste selectedDeviceId (geen stale closure)
+      setSelectedDeviceId((prev) => {
+        // als user al iets gekozen heeft: hou dat vast
+        if (prev) {
+          const exists = data.some((d) => d.device_id === prev);
+          // als device nog bestaat: keep
+          if (exists) return prev;
+          // als device weg is (tijdelijk/nieuw netwerk): kies eerste als fallback
+          return data[0]?.device_id ?? "";
+        }
+
+        // als er nog niks gekozen is: pak eerste
+        return data[0]?.device_id ?? "";
+      });
+    } catch (err) {
+      console.error("Could not fetch devices:", err);
+    }
+  };
+
+  fetchDevices();
+  const id = window.setInterval(fetchDevices, 60_000);
+
+  return () => window.clearInterval(id);
+}, [BACKEND_URL]);
+
 
   // ---------- Live ----------
   const LIVE_WINDOW_MS = 20_000; // laatste 20 seconden
