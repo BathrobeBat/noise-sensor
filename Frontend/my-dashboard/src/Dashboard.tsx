@@ -22,7 +22,6 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? "http://localhost:8080";
 
 // ---- Types ----
 type LivePoint = { t: number; dba: number };
-
 type HistoryPoint = { timestamp: string; dba: number };
 
 type Device = {
@@ -136,27 +135,44 @@ export default function Dashboard() {
   );
 
   useEffect(() => {
-    const fetchDevices = async () => {
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/devices`);
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const data: Device[] = await res.json();
-        setDevices(data);
-        if (!selectedDeviceId && data.length > 0) setSelectedDeviceId(data[0].device_id);
-      } catch (err) {
-        console.error("Could not fetch devices:", err);
-      }
-    };
+  const fetchDevices = async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/devices`);
+      if (!res.ok) throw new Error("HTTP " + res.status);
 
-    fetchDevices();
-    const id = setInterval(fetchDevices, 60_000);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+      const data: Device[] = await res.json();
+      setDevices(data);
+
+      // ✅ Gebruik de echte laatste selectedDeviceId (geen stale closure)
+      setSelectedDeviceId((prev) => {
+        // als user al iets gekozen heeft: hou dat vast
+        if (prev) {
+          const exists = data.some((d) => d.device_id === prev);
+          // als device nog bestaat: keep
+          if (exists) return prev;
+          // als device weg is (tijdelijk/nieuw netwerk): kies eerste als fallback
+          return data[0]?.device_id ?? "";
+        }
+
+        // als er nog niks gekozen is: pak eerste
+        return data[0]?.device_id ?? "";
+      });
+    } catch (err) {
+      console.error("Could not fetch devices:", err);
+    }
+  };
+
+  fetchDevices();
+  const id = window.setInterval(fetchDevices, 60_000);
+
+  return () => window.clearInterval(id);
+}, [BACKEND_URL]);
+
 
   // ---------- Live ----------
-  const LIVE_POINTS = 20;
+  const LIVE_WINDOW_MS = 20_000; // laatste 20 seconden
   const [live, setLive] = useState<LivePoint[]>([]);
+  const [liveNow, setLiveNow] = useState<number>(() => Date.now()); // voor schuivende X-as
   const [liveStatus, setLiveStatus] = useState<
     { kind: "idle" | "loading" | "ok" | "unavailable"; message?: string; lastSeen?: string }
   >({ kind: "idle" });
@@ -168,6 +184,7 @@ export default function Dashboard() {
 
     setLive([]);
     setLiveStatus({ kind: "loading" });
+    setLiveNow(Date.now());
 
     if (liveTimerRef.current) {
       window.clearInterval(liveTimerRef.current);
@@ -210,7 +227,15 @@ export default function Dashboard() {
         }
 
         const now = Date.now();
-        setLive((prev) => [...prev.slice(-(LIVE_POINTS - 1)), { t: now, dba }]);
+        setLiveNow(now);
+
+        // Bewaar alleen punten uit de laatste 20s (op tijd, niet op count)
+        setLive((prev) => {
+          const next = [...prev, { t: now, dba }];
+          const cutoff = now - LIVE_WINDOW_MS;
+          return next.filter((p) => p.t >= cutoff);
+        });
+
         setLiveStatus({ kind: "ok", lastSeen: ts });
       } catch (err) {
         setLiveStatus({
@@ -234,6 +259,12 @@ export default function Dashboard() {
 
   const current = live[live.length - 1]?.dba ?? 0;
   const status = classify(current, isNight);
+
+  // schuivende window voor X-as
+  const liveDomain = useMemo<[number, number]>(() => {
+    const end = liveNow || Date.now();
+    return [end - LIVE_WINDOW_MS, end];
+  }, [liveNow]);
 
   // ---------- History ----------
   const [preset, setPreset] = useState<Preset>("60m");
@@ -343,7 +374,6 @@ export default function Dashboard() {
       <div
         style={{
           display: "grid",
-          // CHANGED: right column smaller (~30% less), left column bigger
           gridTemplateColumns: "1.55fr 0.95fr",
           gap: 16,
           alignItems: "stretch",
@@ -354,9 +384,6 @@ export default function Dashboard() {
           <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 16 }}>
             {/* Logo card */}
             <div style={{ ...cardStyle, padding: 12 }}>
-              <div style={{ fontSize: 12, fontWeight: 800, opacity: 0.8, marginBottom: 10 }}>
-                Innovation in Medicine
-              </div>
               <div
                 style={{
                   width: "100%",
@@ -376,14 +403,15 @@ export default function Dashboard() {
                   style={{ width: "100%", height: "100%", objectFit: "contain" }}
                 />
               </div>
-
-              <div style={{ marginTop: 10, fontSize: 12, opacity: 0.8 }}>
-                Selected sensor:
-                <div style={{ marginTop: 4, fontWeight: 800, opacity: 0.95 }}>
-                  {selectedDevice?.device_id ?? "—"}{" "}
-                  {selectedDevice?.label ? `(${selectedDevice.label})` : ""}
+              <center>
+                <div style={{ marginTop: 10, fontSize: 12, opacity: 0.8 }}>
+                  Selected sensor:
+                  <div style={{ marginTop: 4, fontWeight: 800, opacity: 0.95 }}>
+                    {selectedDevice?.device_id ?? "—"}{" "}
+                    {selectedDevice?.label ? `(${selectedDevice.label})` : ""}
+                  </div>
                 </div>
-              </div>
+              </center>
             </div>
 
             {/* Info card */}
@@ -495,7 +523,10 @@ export default function Dashboard() {
 
             <div style={{ height: 420 }}>
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={historicalChartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                <AreaChart
+                  data={historicalChartData}
+                  margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
+                >
                   <CartesianGrid stroke={theme.grid} strokeDasharray="3 3" />
                   <XAxis
                     dataKey="time"
@@ -504,7 +535,11 @@ export default function Dashboard() {
                     interval="preserveStartEnd"
                     minTickGap={32}
                   />
-                  <YAxis domain={[35, 85]} tick={{ fill: theme.ink }} tickFormatter={(v) => `${v} dB`} />
+                  <YAxis
+                    domain={[35, 85]}
+                    tick={{ fill: theme.ink }}
+                    tickFormatter={(v) => `${v} dB`}
+                  />
                   <Tooltip
                     labelFormatter={(value) => formatTime(value as number)}
                     contentStyle={{
@@ -513,7 +548,14 @@ export default function Dashboard() {
                       color: theme.ink,
                     }}
                   />
-                  <Area type="monotone" dataKey="dba" name="dB(A)" stroke={theme.primary} fill={theme.primaryFill} fillOpacity={0.5} />
+                  <Area
+                    type="monotone"
+                    dataKey="dba"
+                    name="dB(A)"
+                    stroke={theme.primary}
+                    fill={theme.primaryFill}
+                    fillOpacity={0.5}
+                  />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -587,7 +629,7 @@ export default function Dashboard() {
           <div style={cardStyle}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
               <div style={{ fontSize: 14, fontWeight: 800, opacity: 0.95 }}>
-                Live (last ~{LIVE_POINTS}s)
+                Live (last ~20s)
               </div>
 
               <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
@@ -619,8 +661,7 @@ export default function Dashboard() {
                 <div style={{ fontSize: 13, opacity: 0.85, lineHeight: 1.4 }}>
                   {liveStatus.kind === "loading"
                     ? "Loading live data…"
-                    : liveStatus.message ??
-                      "No data received for this device."}
+                    : liveStatus.message ?? "No data received for this device."}
                 </div>
 
                 <div style={{ marginTop: 10, fontSize: 12, opacity: 0.8 }}>
@@ -643,12 +684,20 @@ export default function Dashboard() {
                     <CartesianGrid stroke={theme.grid} strokeDasharray="3 3" />
                     <XAxis
                       dataKey="t"
+                      type="number"
+                      scale="time"
+                      domain={liveDomain}
+                      allowDataOverflow
                       tick={{ fill: theme.ink }}
                       tickFormatter={(value) => formatTime(value as number)}
-                      interval="preserveStartEnd"
-                      minTickGap={28}
+                      tickCount={5}
+                      minTickGap={40}
                     />
-                    <YAxis domain={[35, 85]} tick={{ fill: theme.ink }} tickFormatter={(v) => `${v} dB`} />
+                    <YAxis
+                      domain={[35, 85]}
+                      tick={{ fill: theme.ink }}
+                      tickFormatter={(v) => `${v} dB`}
+                    />
                     <Tooltip
                       labelFormatter={(value) => formatTime(value as number)}
                       contentStyle={{
@@ -657,7 +706,14 @@ export default function Dashboard() {
                         color: theme.ink,
                       }}
                     />
-                    <Line type="monotone" dataKey="dba" stroke={theme.primary} strokeWidth={2.5} dot={false} />
+                    <Line
+                      type="monotone"
+                      dataKey="dba"
+                      stroke={theme.primary}
+                      strokeWidth={2.5}
+                      dot={false}
+                      isAnimationActive={false}
+                    />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
