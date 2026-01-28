@@ -19,7 +19,7 @@ const char* WIFI_PASS = "WiFi_Passw";
 const char* BACKEND_URL = "http://noise-sensor-alb-899662008.eu-central-1.elb.amazonaws.com/api/noise-data";
 
 //// Locally
-//const char* BACKEND_URL = "http://192.168.0.240:8080/api/noise-data";
+//const char* BACKEND_URL = "http://YOUR_IP:8080/api/noise-data";
 
 // Replace the "xxx" with an 3 number ID that is available
 const char* DEVICE_ID   = "ESP32_xxx";
